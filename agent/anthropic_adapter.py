@@ -797,10 +797,19 @@ def normalize_stream_usage(message_stream: Any) -> Any:
     return message_stream
 
 
+# "stream" as its own word: "upstream said: X is not supported" or a "stream-json" stderr
+# tail is a model/param 400, not a provider that cannot stream (#144896).
+_STREAM_WORD_RE = re.compile(r"(?<![\w-])stream(?:ing|s)?(?![\w-])")
+
+
+def _says_stream_unsupported(err_lower: str) -> bool:
+    return "not supported" in err_lower and _STREAM_WORD_RE.search(err_lower) is not None
+
+
 def _is_stream_unavailable_error(exc: Exception) -> bool:
     """True when an Anthropic stream call should fall back to create()."""
     err_lower = str(exc).lower()
-    if "stream" in err_lower and "not supported" in err_lower:
+    if _says_stream_unsupported(err_lower):
         return True
     if "unexpected event order" in err_lower:
         return True

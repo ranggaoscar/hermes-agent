@@ -668,6 +668,53 @@ class TestStreamingFallback:
         # The flag should be set so the main retry loop switches to non-streaming
         assert agent._disable_streaming is True
 
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_upstream_not_supported_keeps_streaming(self, mock_close, mock_create):
+        """A wrapped model/param 400 ("upstream said: ... not supported") is not a streaming
+        rejection and must not switch the session off streaming (#144896)."""
+        from run_agent import AIAgent
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception(
+            "Incomplete upstream response (first attempt: status 400, upstream said: "
+            "adaptive thinking is not supported on this model)"
+        )
+        mock_create.return_value = mock_client
+
+        agent = AIAgent(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
+            model="test/model",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
+        agent.api_mode = "chat_completions"
+        agent._interrupt_requested = False
+
+        with pytest.raises(Exception, match="adaptive thinking"):
+            agent._interruptible_streaming_api_call({})
+
+        assert not agent._disable_streaming
+
+    @pytest.mark.parametrize("message, expected", [
+        ("Streaming is not supported for this model", True),
+        ("stream not supported for this model", True),
+        ("Stream mode is not supported", True),
+        ("'stream' is not supported by this endpoint", True),
+        ("Incomplete upstream response (first attempt: status 400, upstream said: "
+         "adaptive thinking is not supported on this model)", False),
+        ("upstream said: For 'integer' type, properties maximum, minimum are not supported", False),
+        ("Native history replay not supported: resume failed\n"
+         "native stderr: Error: --input-format stream-json requires --output-format", False),
+        ("upstream said: prompt is too long", False),
+    ])
+    def test_stream_unavailable_matches_stream_as_a_word(self, message, expected):
+        from agent.anthropic_adapter import _is_stream_unavailable_error
+
+        assert _is_stream_unavailable_error(Exception(message)) is expected
+
 
     @patch("run_agent.AIAgent._create_request_openai_client")
     @patch("run_agent.AIAgent._close_request_openai_client")
