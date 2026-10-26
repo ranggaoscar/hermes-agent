@@ -797,13 +797,17 @@ def normalize_stream_usage(message_stream: Any) -> Any:
     return message_stream
 
 
-# "stream" as its own word: "upstream said: X is not supported" or a "stream-json" stderr
-# tail is a model/param 400, not a provider that cannot stream (#144896).
-_STREAM_WORD_RE = re.compile(r"(?<![\w-])stream(?:ing|s)?(?![\w-])")
+# "stream" as the subject of the message: "upstream said: X is not supported" or a "stream-json"
+# stderr tail is a model/param 400, not a provider that cannot stream (#144896). The SSE media
+# type counts too: it names streaming without the word, so a word-only rule turns a genuine
+# text/event-stream refusal into a terminal error instead of the non-streaming fallback.
+_STREAM_SUBJECT_RE = re.compile(
+    r"(?<![\w-])stream(?:ing|s)?(?![\w-])|(?<![\w-])(?:text/)?event-stream(?![\w-])"
+)
 
 
 def _says_stream_unsupported(err_lower: str) -> bool:
-    return "not supported" in err_lower and _STREAM_WORD_RE.search(err_lower) is not None
+    return "not supported" in err_lower and _STREAM_SUBJECT_RE.search(err_lower) is not None
 
 
 def _is_stream_unavailable_error(exc: Exception) -> bool:
