@@ -469,31 +469,38 @@ def _custom_provider_extra_headers(base_url) -> dict[str, str]:
         return {}
 
 
-def _auth_style(api_key, base_url, normalized_base_url) -> str:
+def _auth_style(api_key, base_url, normalized_base_url, *, provider: str | None = None) -> str:
     """Order-sensitive endpoint/key classification for :func:`build_anthropic_client`. ``kimi``:
     Kimi's /coding endpoint 403s without a User-Agent (the Kimi team asked for proper attribution).
     ``bearer``: MiniMax & co. want Authorization: Bearer — checked before the OAuth shape test
     because their secrets lack the sk-ant-api prefix and would be misread as OAuth/setup tokens.
     ``api_key``: third-party proxies use their own x-api-key keys (skip OAuth detection). ``oauth``:
-    Bearer auth + Claude Code identity (Anthropic routes OAuth by user-agent; without it, 500s)."""
+    Bearer auth + Claude Code identity (Anthropic routes OAuth by user-agent; without it, 500s).
+    A qualifying OAuth route (``anthropic_route_is_oauth``: the ``anthropic`` provider itself, or a
+    native host) keeps the ``oauth`` style even behind a non-anthropic.com base_url — a transparent
+    first-party proxy must not strip the Claude Code identity from an already-OAuth credential
+    (#148400). Third-party keys keep ``api_key``: the flip only happens for a credential that is
+    *already* an OAuth token on a first-party ``anthropic`` route."""
     if _is_kimi_coding_endpoint(base_url):
         return "kimi"
     if _requires_bearer_auth(normalized_base_url):
         return "bearer"
-    if _is_third_party_anthropic_endpoint(base_url):
+    if _is_third_party_anthropic_endpoint(base_url) and not anthropic_route_is_oauth(base_url, api_key, provider=provider):
         return "api_key"
     if _is_oauth_token(api_key):
         return "oauth"
     return "api_key"
 
 
-def build_anthropic_client(api_key, base_url: str | None = None, timeout: float | None = None, *, drop_context_1m_beta: bool = False):
+def build_anthropic_client(api_key, base_url: str | None = None, timeout: float | None = None, *, drop_context_1m_beta: bool = False, provider: str | None = None):
     """Create an Anthropic client, auto-detecting setup-tokens vs API keys. ``api_key`` is a static
     ``str`` or a ``Callable[[], str]`` Entra ID bearer provider (routed through
     :func:`_build_anthropic_client_with_bearer_hook`). ``timeout`` overrides the 900s read timeout
     (connect stays 10s). ``drop_context_1m_beta`` strips ``context-1m-2025-08-07`` from the
     client-level beta header — the reactive OAuth retry in run_agent uses it after a subscription
-    rejects it; fresh clients keep the default so 1M-capable subscriptions keep the capability."""
+    rejects it; fresh clients keep the default so 1M-capable subscriptions keep the capability.
+    ``provider`` names the resolved provider route so a first-party ``anthropic`` route keeps the
+    OAuth wire identity behind a non-anthropic.com base_url (transparent local proxy, #148400)."""
     sdk = _require_sdk("the Anthropic provider")
     if callable(api_key) and not isinstance(api_key, str):
         return _build_anthropic_client_with_bearer_hook(
@@ -504,7 +511,7 @@ def build_anthropic_client(api_key, base_url: str | None = None, timeout: float 
     if "default_query" in kwargs:  # historical: this path also strips a stray trailing slash on Azure
         kwargs["base_url"] = normalized_base_url.rstrip("/")
     common_betas = _common_betas_for_base_url(normalized_base_url, drop_context_1m_beta=drop_context_1m_beta)
-    style = _auth_style(api_key, base_url, normalized_base_url)
+    style = _auth_style(api_key, base_url, normalized_base_url, provider=provider)
     kwargs["auth_token" if style in ("bearer", "oauth") else "api_key"] = api_key
     headers = _beta_header(common_betas + _OAUTH_ONLY_BETAS if style == "oauth" else common_betas)
     if style == "kimi":

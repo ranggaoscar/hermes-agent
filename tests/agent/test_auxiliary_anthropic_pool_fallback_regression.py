@@ -67,8 +67,9 @@ class TestAnthropicPoolExhaustedFallsBackToEnv:
         monkeypatch.setenv("ANTHROPIC_TOKEN", "«redacted:sk-…»-oauth-token")
         captured = {}
 
-        def _fake_build(token, base_url):
+        def _fake_build(token, base_url, provider=None):
             captured["base_url"] = base_url
+            captured["provider"] = provider
             return MagicMock()
 
         with patch(
@@ -82,3 +83,4 @@ class TestAnthropicPoolExhaustedFallsBackToEnv:
 
         assert client is not None
         assert captured["base_url"] == "https://api.anthropic.com"
+        assert captured["provider"] == "anthropic"

@@ -3041,7 +3041,7 @@ def _try_anthropic(explicit_api_key: Optional[str | Callable[[], str]] = None,
         return _AuxProbeClientStub(api_key="", base_url=base_url), model
     logger.debug("Auxiliary client: Anthropic native (%s) at %s (oauth=%s)", model, base_url, is_oauth)
     try:
-        real_client = build_anthropic_client(token, base_url)
+        real_client = build_anthropic_client(token, base_url, provider="anthropic")
     except ImportError:
         return None, None  # Adapter imports fine but the anthropic SDK itself is missing.
     return AnthropicAuxiliaryClient(real_client, model, token, base_url, is_oauth=is_oauth), model
